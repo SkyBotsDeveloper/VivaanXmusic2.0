@@ -1,0 +1,7 @@
+echo "Vivaan X dev"
+rm -rf __p*
+rm -f *.session
+sleep 1 
+echo "Starting Bot"
+python3 -m VivaanXmusic
+#python3 watchdog.py
