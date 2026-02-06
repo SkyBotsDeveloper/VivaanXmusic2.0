@@ -127,6 +127,12 @@ class YouTubeAPI:
             link = str(link).strip()
             if not link:
                 return None
+            try:
+                limit = int(limit) if limit is not None else 20
+                if limit <= 0:
+                    limit = 20
+            except (TypeError, ValueError):
+                limit = 20
             results = VideosSearch(link, limit=limit)
             search_results = (await results.next()).get("result", [])
 
