@@ -86,6 +86,15 @@ def _safe_filename(value: str) -> str:
     return cleaned
 
 
+def _ytproxy_info_url(base: str, vid_id: str) -> Union[str, None]:
+    if not base or not vid_id:
+        return None
+    base = str(base).rstrip("/")
+    if base.endswith("/info"):
+        return f"{base}/{vid_id}"
+    return f"{base}/info/{vid_id}"
+
+
 async def shell_cmd(cmd):
     proc = await asyncio.create_subprocess_exec(
         *cmd,
@@ -407,7 +416,10 @@ class YouTubeAPI:
 
         def audio_dl():
             try:
-                res = requests.get(f"{YTPROXY}/{vid_id}")
+                info_url = _ytproxy_info_url(YTPROXY, vid_id)
+                if not info_url:
+                    return None
+                res = requests.get(info_url)
                 response = res.json()
                 if response['status'] == 'success':
                     fpath = f"downloads/{vid_id}.{response['ext']}"
@@ -523,4 +535,6 @@ class YouTubeAPI:
         else:
             direct = True
             downloaded_file = await loop.run_in_executor(None, audio_dl)
+        if not downloaded_file:
+            raise ValueError("Failed to download media")
         return downloaded_file, direct
