@@ -81,6 +81,15 @@ def _has_unsafe_url_chars(value: str) -> bool:
     return any(ch in value for ch in _UNSAFE_URL_CHARS)
 
 
+def _safe_filename(value: str) -> str:
+    if not value:
+        return value
+    cleaned = value.replace("/", "_").replace("\\", "_")
+    while ".." in cleaned:
+        cleaned = cleaned.replace("..", ".")
+    return cleaned
+
+
 async def shell_cmd(cmd):
     proc = await asyncio.create_subprocess_exec(
         *cmd,
@@ -417,6 +426,7 @@ class YouTubeAPI:
         if videoid:
             vid_id = link
             link = self.base + link
+        safe_title = _safe_filename(title) if title else title
         loop = asyncio.get_running_loop()
 
         def create_session():
@@ -617,7 +627,7 @@ class YouTubeAPI:
         
         def song_video_dl():
             formats = f"{format_id}+140"
-            fpath = f"downloads/{title}"
+            fpath = f"downloads/{safe_title}"
             ydl_optssx = {
                 "format": formats,
                 "outtmpl": fpath,
@@ -633,7 +643,7 @@ class YouTubeAPI:
             x.download([link])
 
         def song_audio_dl():
-            fpath = f"downloads/{title}.%(ext)s"
+            fpath = f"downloads/{safe_title}.%(ext)s"
             ydl_optssx = {
                 "format": format_id,
                 "outtmpl": fpath,
@@ -656,11 +666,11 @@ class YouTubeAPI:
 
         if songvideo:
             await loop.run_in_executor(None, song_video_dl)
-            fpath = f"downloads/{title}.mp4"
+            fpath = f"downloads/{safe_title}.mp4"
             return fpath
         elif songaudio:
             await loop.run_in_executor(None, song_audio_dl)
-            fpath = f"downloads/{title}.mp3"
+            fpath = f"downloads/{safe_title}.mp3"
             return fpath
         elif video:
             direct = True
