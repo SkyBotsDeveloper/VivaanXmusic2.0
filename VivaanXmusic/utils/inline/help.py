@@ -1,16 +1,24 @@
 from typing import Union
 
+from pyrogram.enums import ButtonStyle
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from VivaanXmusic import app
 
 
 def help_pannel(_, START: Union[bool, int] = None):
-    first = [InlineKeyboardButton(text=_["CLOSE_BUTTON"], callback_data=f"close")]
+    first = [
+        InlineKeyboardButton(
+            text=_["CLOSE_BUTTON"],
+            callback_data="close",
+            style=ButtonStyle.DANGER,
+        )
+    ]
     second = [
         InlineKeyboardButton(
             text=_["BACK_BUTTON"],
             callback_data=f"settingsback_helper",
+            style=ButtonStyle.PRIMARY,
         ),
     ]
     mark = second if START else first
@@ -99,6 +107,7 @@ def help_back_markup(_):
                 InlineKeyboardButton(
                     text=_["BACK_BUTTON"],
                     callback_data=f"settings_back_helper",
+                    style=ButtonStyle.PRIMARY,
                 ),
             ]
         ]
@@ -112,6 +121,7 @@ def private_help_panel(_):
             InlineKeyboardButton(
                 text=_["S_B_4"],
                 url=f"https://t.me/{app.username}?start=help",
+                style=ButtonStyle.PRIMARY,
             ),
         ],
     ]

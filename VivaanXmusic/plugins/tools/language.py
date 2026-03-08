@@ -1,6 +1,6 @@
-from pykeyboard import InlineKeyboard
 from pyrogram import filters
-from pyrogram.types import InlineKeyboardButton, Message
+from pyrogram.enums import ButtonStyle
+from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from VivaanXmusic import app
 from VivaanXmusic.utils.database import get_lang, set_lang
@@ -10,26 +10,35 @@ from strings import get_string, languages_present
 
 
 def lanuages_keyboard(_):
-    keyboard = InlineKeyboard(row_width=2)
-    keyboard.add(
-        *[
-            (
-                InlineKeyboardButton(
-                    text=languages_present[i],
-                    callback_data=f"languages:{i}",
-                )
+    buttons = []
+    row = []
+    for language_code, language_name in languages_present.items():
+        row.append(
+            InlineKeyboardButton(
+                text=language_name,
+                callback_data=f"languages:{language_code}",
             )
-            for i in languages_present
+        )
+        if len(row) == 2:
+            buttons.append(row)
+            row = []
+    if row:
+        buttons.append(row)
+    buttons.append(
+        [
+            InlineKeyboardButton(
+                text=_["BACK_BUTTON"],
+                callback_data="settingsback_helper",
+                style=ButtonStyle.PRIMARY,
+            ),
+            InlineKeyboardButton(
+                text=_["CLOSE_BUTTON"],
+                callback_data="close",
+                style=ButtonStyle.DANGER,
+            ),
         ]
     )
-    keyboard.row(
-        InlineKeyboardButton(
-            text=_["BACK_BUTTON"],
-            callback_data=f"settingsback_helper",
-        ),
-        InlineKeyboardButton(text=_["CLOSE_BUTTON"], callback_data=f"close"),
-    )
-    return keyboard
+    return InlineKeyboardMarkup(buttons)
 
 
 @app.on_message(filters.command(["lang", "setlang", "language"]) & ~BANNED_USERS)

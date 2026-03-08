@@ -25,6 +25,7 @@ from VivaanXmusic.utils.decorators.language import language
 from VivaanXmusic.utils.pastebin import SidduBin
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+PROJECT_ROOT = os.path.abspath(os.getcwd())
 
 
 def _run_quiet(args):
@@ -35,27 +36,39 @@ def _run(args):
     return subprocess.run(args, check=False)
 
 
+def _is_current_project_process(proc) -> bool:
+    name = (proc.info.get("name") or "").lower()
+    if not name.startswith("python"):
+        return False
+    cmdline = " ".join(proc.info.get("cmdline") or []).lower()
+    cwd = (proc.info.get("cwd") or "").lower()
+    project_root = PROJECT_ROOT.lower()
+    markers = ("watchdog.py", "vivaanxmusic", "bash start")
+    return project_root in cmdline or project_root in cwd or any(
+        marker in cmdline for marker in markers
+    )
+
+
 def _kill_other_python3():
     current_pid = os.getpid()
-    for proc in psutil.process_iter(["pid", "name"]):
+    for proc in psutil.process_iter(["pid", "name", "cmdline", "cwd"]):
         try:
             if proc.info["pid"] == current_pid:
                 continue
-            name = (proc.info["name"] or "").lower()
-            if name.startswith("python3"):
+            if _is_current_project_process(proc):
                 proc.kill()
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             continue
 
 
 def _spawn_restart():
-    subprocess.Popen(["bash", "start"])
+    subprocess.Popen(["bash", "start"], cwd=PROJECT_ROOT)
     os.kill(os.getpid(), signal.SIGKILL)
 
 
 def _spawn_restart_with_killall():
     _kill_other_python3()
-    subprocess.Popen(["bash", "start"])
+    subprocess.Popen(["bash", "start"], cwd=PROJECT_ROOT)
     os.kill(os.getpid(), signal.SIGKILL)
 
 

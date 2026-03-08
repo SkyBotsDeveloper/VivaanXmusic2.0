@@ -4,6 +4,7 @@ import json
 import os
 import random
 import re
+import time
 from typing import Union
 from urllib.parse import parse_qs, urlparse
 
@@ -136,6 +137,37 @@ class YouTubeAPI:
             "cookie_downloads": 0,
             "existing_files": 0
         }
+        self._cache_ttls = {"video": 300, "search": 180}
+        self._video_details_cache = {}
+        self._search_cache = {}
+
+    def _cache_get(self, cache_store, key, ttl):
+        item = cache_store.get(key)
+        if not item:
+            return None
+        expires_at, value = item
+        if time.monotonic() >= expires_at:
+            cache_store.pop(key, None)
+            return None
+        return value
+
+    def _cache_set(self, cache_store, key, value, ttl):
+        if value is None:
+            return
+        if len(cache_store) >= 256:
+            oldest_key = min(cache_store, key=lambda current_key: cache_store[current_key][0])
+            cache_store.pop(oldest_key, None)
+        cache_store[key] = (time.monotonic() + ttl, value)
+
+    def _prepare_lookup(self, value: str):
+        if value is None:
+            return None
+        cleaned = str(value).strip()
+        if not cleaned:
+            return None
+        if re.fullmatch(r"[A-Za-z0-9_-]{11}", cleaned) or re.search(self.regex, cleaned):
+            return self._normalize_link(cleaned)
+        return cleaned
 
     def _normalize_duration(self, value):
         if isinstance(value, dict):
@@ -300,6 +332,28 @@ class YouTubeAPI:
             return parts[1]
         return None
 
+    async def _search_results(self, query: str, limit: int):
+        prepared_query = self._prepare_lookup(query)
+        if not prepared_query:
+            return []
+        cache_key = (prepared_query.casefold(), int(limit))
+        cached = self._cache_get(
+            self._search_cache, cache_key, self._cache_ttls["search"]
+        )
+        if cached is not None:
+            return cached
+        search = VideosSearch(prepared_query, limit=limit)
+        search_results = (await search.next()).get("result", [])
+        normalized_results = []
+        for result in search_results:
+            normalized = self._normalize_video_result(result)
+            if normalized:
+                normalized_results.append(normalized)
+        self._cache_set(
+            self._search_cache, cache_key, normalized_results, self._cache_ttls["search"]
+        )
+        return normalized_results
+
     def _fetch_primary_media_link_sync(self, vid_id, media_format):
         if not YT_API_KEY or not YTPROXY:
             return None
@@ -400,9 +454,7 @@ class YouTubeAPI:
     async def _get_video_details(self, link: str, limit: int = 20) -> Union[dict, None]:
         """Fetches direct video details for URLs/IDs and search results for text queries."""
         try:
-            if not link:
-                return None
-            link = self._normalize_link(str(link).strip())
+            link = self._prepare_lookup(link)
             if not link:
                 return None
             try:
@@ -414,16 +466,52 @@ class YouTubeAPI:
 
             video_reference = self._extract_video_id(link)
             if video_reference:
+                cached = self._cache_get(
+                    self._video_details_cache,
+                    ("video", video_reference),
+                    self._cache_ttls["video"],
+                )
+                if cached is not None:
+                    return cached
                 result = self._normalize_video_result(await Video.get(video_reference))
                 if result:
+                    self._cache_set(
+                        self._video_details_cache,
+                        ("video", video_reference),
+                        result,
+                        self._cache_ttls["video"],
+                    )
+                    self._cache_set(
+                        self._video_details_cache,
+                        ("lookup", link.casefold(), limit),
+                        result,
+                        self._cache_ttls["video"],
+                    )
                     return result
 
-            results = VideosSearch(link, limit=limit)
-            search_results = (await results.next()).get("result", [])
+            cached = self._cache_get(
+                self._video_details_cache,
+                ("lookup", link.casefold(), limit),
+                self._cache_ttls["video"],
+            )
+            if cached is not None:
+                return cached
+
+            search_results = await self._search_results(link, limit)
             for result in search_results:
-                normalized = self._normalize_video_result(result)
-                if normalized:
-                    return normalized
+                self._cache_set(
+                    self._video_details_cache,
+                    ("lookup", link.casefold(), limit),
+                    result,
+                    self._cache_ttls["video"],
+                )
+                self._cache_set(
+                    self._video_details_cache,
+                    ("video", result["id"]),
+                    result,
+                    self._cache_ttls["video"],
+                )
+                return result
             return None
 
         except Exception as e:
@@ -465,24 +553,18 @@ class YouTubeAPI:
     async def details(self, link: str, videoid: Union[bool, str] = None):
         if videoid:
             link = self.base + link
-        if "&" in link:
-            link = link.split("&")[0]
-        if "?si=" in link:
-            link = link.split("?si=")[0]
-        elif "&si=" in link:
-            link = link.split("&si=")[0]
-
+        link = self._prepare_lookup(link)
 
         result = await self._get_video_details(link)
         if not result:
             raise ValueError("No suitable video found or video is unavailable.")
 
         title = result["title"]
-        duration_min = result["duration"]
+        duration_min = result.get("duration") or "Unknown"
         thumbnail = self._thumbnail_from_result(result)
         vidid = result["id"]
 
-        if str(duration_min) == "None":
+        if duration_min == "Unknown":
             duration_sec = 0
         else:
             duration_sec = int(time_to_seconds(duration_min))
@@ -492,13 +574,8 @@ class YouTubeAPI:
     async def title(self, link: str, videoid: Union[bool, str] = None):
         if videoid:
             link = self.base + link
-        if "&" in link:
-            link = link.split("&")[0]
-        if "?si=" in link:
-            link = link.split("?si=")[0]
-        elif "&si=" in link:
-            link = link.split("&si=")[0]
-            
+        link = self._prepare_lookup(link)
+
         result = await self._get_video_details(link)
         if not result:
             raise ValueError("No suitable video found or video is unavailable.")
@@ -507,27 +584,17 @@ class YouTubeAPI:
     async def duration(self, link: str, videoid: Union[bool, str] = None):
         if videoid:
             link = self.base + link
-        if "&" in link:
-            link = link.split("&")[0]
-        if "?si=" in link:
-            link = link.split("?si=")[0]
-        elif "&si=" in link:
-            link = link.split("&si=")[0]
+        link = self._prepare_lookup(link)
 
         result = await self._get_video_details(link)
         if not result:
             raise ValueError("No suitable video found or video is unavailable.")
-        return result["duration"]
+        return result.get("duration") or "Unknown"
 
     async def thumbnail(self, link: str, videoid: Union[bool, str] = None):
         if videoid:
             link = self.base + link
-        if "&" in link:
-            link = link.split("&")[0]
-        if "?si=" in link:
-            link = link.split("?si=")[0]
-        elif "&si=" in link:
-            link = link.split("&si=")[0]
+        link = self._prepare_lookup(link)
 
         result = await self._get_video_details(link)
         if not result:
@@ -588,12 +655,7 @@ class YouTubeAPI:
     async def track(self, link: str, videoid: Union[bool, str] = None):
         if videoid:
             link = self.base + link
-        if "&" in link:
-            link = link.split("&")[0]
-        if "?si=" in link:
-            link = link.split("?si=")[0]
-        elif "&si=" in link:
-            link = link.split("&si=")[0]
+        link = self._prepare_lookup(link)
 
         result = await self._get_video_details(link)
         if not result:
@@ -603,7 +665,7 @@ class YouTubeAPI:
             "title": result["title"],
             "link": result["link"],
             "vidid": result["id"],
-            "duration_min": result["duration"],
+            "duration_min": result.get("duration") or "Unknown",
             "thumb": self._thumbnail_from_result(result),
         }
         return track_details, result["id"]
@@ -646,23 +708,14 @@ class YouTubeAPI:
     async def slider(self, link: str, query_type: int, videoid: Union[bool, str] = None):
         if videoid:
             link = self.base + link
-        if "&" in link:
-            link = link.split("&")[0]
-        if "?si=" in link:
-            link = link.split("?si=")[0]
-        elif "&si=" in link:
-            link = link.split("&si=")[0]
+        link = self._prepare_lookup(link)
 
         try:
             results = []
-            search = VideosSearch(link, limit=10)
-            search_results = (await search.next()).get("result", [])
+            search_results = await self._search_results(link, 10)
 
-            for result in search_results:
-                normalized = self._normalize_video_result(result)
-                if not normalized:
-                    continue
-                duration_str = normalized.get("duration", "0:00")
+            for normalized in search_results:
+                duration_str = normalized.get("duration") or "0:00"
                 try:
                     parts = duration_str.split(":")
                     duration_secs = 0
