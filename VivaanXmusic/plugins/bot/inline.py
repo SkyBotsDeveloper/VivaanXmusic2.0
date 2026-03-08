@@ -3,7 +3,7 @@ from pyrogram.types import (
     InlineKeyboardMarkup,
     InlineQueryResultPhoto,
 )
-from youtubesearchpython.__future__ import VideosSearch
+from youtubesearchpython.future import VideosSearch
 
 from VivaanXmusic import app
 from VivaanXmusic.utils.inlinequery import answer
@@ -21,8 +21,8 @@ async def inline_query_handler(client, query):
             return
     else:
         a = VideosSearch(text, limit=20)
-        result = (await a.next()).get("result")
-        for x in range(15):
+        result = (await a.next()).get("result", [])
+        for x in range(min(15, len(result))):
             title = (result[x]["title"]).title()
             duration = result[x]["duration"]
             views = result[x]["viewCount"]["short"]

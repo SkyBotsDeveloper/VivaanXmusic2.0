@@ -6,7 +6,7 @@ import aiohttp
 import numpy as np
 from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont
 from unidecode import unidecode
-from youtubesearchpython.__future__ import VideosSearch
+from youtubesearchpython.future import Video
 
 from VivaanXmusic import app
 from config import YOUTUBE_IMG_URL
@@ -44,29 +44,33 @@ async def get_thumb(videoid,user_id):
     if os.path.isfile(f"cache/{videoid}_{user_id}.png"):
         return f"cache/{videoid}_{user_id}.png"
 
-    url = f"https://www.youtube.com/watch?v={videoid}"
     try:
-        results = VideosSearch(url, limit=1)
-        for result in (await results.next())["result"]:
-            try:
-                title = result["title"]
-                title = re.sub(r"\W+", " ", title)
-                title = title.title()
-            except:
-                title = "Unsupported Title"
-            try:
-                duration = result["duration"]
-            except:
-                duration = "Unknown Mins"
-            thumbnail = result["thumbnails"][0]["url"].split("?")[0]
-            try:
-                views = result["viewCount"]["short"]
-            except:
-                views = "Unknown Views"
-            try:
-                channel = result["channel"]["name"]
-            except:
-                channel = "Unknown Channel"
+        result = await Video.get(videoid)
+        if not result or not result.get("title"):
+            return YOUTUBE_IMG_URL
+        try:
+            title = result["title"]
+            title = re.sub(r"\W+", " ", title)
+            title = title.title()
+        except:
+            title = "Unsupported Title"
+        try:
+            duration = (result.get("duration") or {}).get("text") or "Unknown Mins"
+        except:
+            duration = "Unknown Mins"
+        thumbnail = YOUTUBE_IMG_URL
+        for thumb in result.get("thumbnails") or []:
+            if isinstance(thumb, dict) and thumb.get("url"):
+                thumbnail = thumb["url"].split("?")[0]
+                break
+        try:
+            views = (result.get("viewCount") or {}).get("short") or "Unknown Views"
+        except:
+            views = "Unknown Views"
+        try:
+            channel = (result.get("channel") or {}).get("name") or "Unknown Channel"
+        except:
+            channel = "Unknown Channel"
 
         async with aiohttp.ClientSession() as session:
             async with session.get(thumbnail) as resp:

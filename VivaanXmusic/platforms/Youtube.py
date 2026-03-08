@@ -13,7 +13,7 @@ from pyrogram.enums import MessageEntityType
 from pyrogram.types import Message
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
-from youtubesearchpython.__future__ import VideosSearch
+from youtubesearchpython.future import Video, VideosSearch
 
 from VivaanXmusic import LOGGER
 from VivaanXmusic.utils.formatters import time_to_seconds
@@ -135,6 +135,67 @@ class YouTubeAPI:
             "okflix_downloads": 0,
             "cookie_downloads": 0,
             "existing_files": 0
+        }
+
+    def _normalize_duration(self, value):
+        if isinstance(value, dict):
+            text = value.get("text")
+            if text:
+                return text
+            seconds = value.get("seconds")
+            if seconds is None:
+                return None
+            seconds = int(seconds)
+            minutes, seconds = divmod(seconds, 60)
+            hours, minutes = divmod(minutes, 60)
+            if hours:
+                return f"{hours}:{minutes:02d}:{seconds:02d}"
+            return f"{minutes}:{seconds:02d}"
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped or None
+        return None
+
+    def _thumbnail_from_result(self, result):
+        thumbnails = result.get("thumbnails") or []
+        for thumb in thumbnails:
+            if isinstance(thumb, dict) and thumb.get("url"):
+                return thumb["url"].split("?")[0]
+        return None
+
+    def _normalize_video_result(self, result):
+        if not isinstance(result, dict):
+            return None
+
+        video_id = result.get("id") or self._extract_video_id(result.get("link"))
+        title = result.get("title")
+        if not video_id or not title:
+            return None
+
+        duration = self._normalize_duration(result.get("duration"))
+        channel = result.get("channel")
+        if not isinstance(channel, dict):
+            channel = {}
+
+        view_count = result.get("viewCount")
+        if isinstance(view_count, str):
+            view_count = {"text": view_count, "short": view_count}
+        elif not isinstance(view_count, dict):
+            view_count = {"text": None, "short": None}
+
+        return {
+            **result,
+            "id": video_id,
+            "title": title,
+            "link": result.get("link") or f"{self.base}{video_id}",
+            "duration": duration,
+            "thumbnails": result.get("thumbnails") or [],
+            "channel": {
+                "name": channel.get("name"),
+                "id": channel.get("id"),
+                "link": channel.get("link"),
+            },
+            "viewCount": view_count,
         }
 
     def _build_browser_headers(self):
@@ -337,11 +398,11 @@ class YouTubeAPI:
                 session.close()
 
     async def _get_video_details(self, link: str, limit: int = 20) -> Union[dict, None]:
-        """Helper function to get video details with duration limit and error handling"""
+        """Fetches direct video details for URLs/IDs and search results for text queries."""
         try:
             if not link:
                 return None
-            link = str(link).strip()
+            link = self._normalize_link(str(link).strip())
             if not link:
                 return None
             try:
@@ -350,13 +411,20 @@ class YouTubeAPI:
                     limit = 20
             except (TypeError, ValueError):
                 limit = 20
+
+            video_reference = self._extract_video_id(link)
+            if video_reference:
+                result = self._normalize_video_result(await Video.get(video_reference))
+                if result:
+                    return result
+
             results = VideosSearch(link, limit=limit)
             search_results = (await results.next()).get("result", [])
-
-            if not search_results:
-                return None
-            else:
-                return search_results[0]
+            for result in search_results:
+                normalized = self._normalize_video_result(result)
+                if normalized:
+                    return normalized
+            return None
 
         except Exception as e:
             LOGGER(__name__).error(f"Error in _get_video_details: {str(e)}")
@@ -407,11 +475,11 @@ class YouTubeAPI:
 
         result = await self._get_video_details(link)
         if not result:
-            raise ValueError("No suitable video found (duration > 1 hour or video unavailable)")
+            raise ValueError("No suitable video found or video is unavailable.")
 
         title = result["title"]
         duration_min = result["duration"]
-        thumbnail = result["thumbnails"][0]["url"].split("?")[0]
+        thumbnail = self._thumbnail_from_result(result)
         vidid = result["id"]
 
         if str(duration_min) == "None":
@@ -433,7 +501,7 @@ class YouTubeAPI:
             
         result = await self._get_video_details(link)
         if not result:
-            raise ValueError("No suitable video found (duration > 1 hour or video unavailable)")
+            raise ValueError("No suitable video found or video is unavailable.")
         return result["title"]
 
     async def duration(self, link: str, videoid: Union[bool, str] = None):
@@ -448,7 +516,7 @@ class YouTubeAPI:
 
         result = await self._get_video_details(link)
         if not result:
-            raise ValueError("No suitable video found (duration > 1 hour or video unavailable)")
+            raise ValueError("No suitable video found or video is unavailable.")
         return result["duration"]
 
     async def thumbnail(self, link: str, videoid: Union[bool, str] = None):
@@ -463,8 +531,11 @@ class YouTubeAPI:
 
         result = await self._get_video_details(link)
         if not result:
-            raise ValueError("No suitable video found (duration > 1 hour or video unavailable)")
-        return result["thumbnails"][0]["url"].split("?")[0]
+            raise ValueError("No suitable video found or video is unavailable.")
+        thumbnail = self._thumbnail_from_result(result)
+        if not thumbnail:
+            raise ValueError("Thumbnail not available for the requested video.")
+        return thumbnail
 
     async def video(self, link: str, videoid: Union[bool, str] = None):
         if videoid:
@@ -526,14 +597,14 @@ class YouTubeAPI:
 
         result = await self._get_video_details(link)
         if not result:
-            raise ValueError("No suitable video found (duration > 1 hour or video unavailable)")
+            raise ValueError("No suitable video found or video is unavailable.")
 
         track_details = {
             "title": result["title"],
             "link": result["link"],
             "vidid": result["id"],
             "duration_min": result["duration"],
-            "thumb": result["thumbnails"][0]["url"].split("?")[0],
+            "thumb": self._thumbnail_from_result(result),
         }
         return track_details, result["id"]
 
@@ -587,9 +658,11 @@ class YouTubeAPI:
             search = VideosSearch(link, limit=10)
             search_results = (await search.next()).get("result", [])
 
-            # Filter videos longer than 1 hour
             for result in search_results:
-                duration_str = result.get("duration", "0:00")
+                normalized = self._normalize_video_result(result)
+                if not normalized:
+                    continue
+                duration_str = normalized.get("duration", "0:00")
                 try:
                     parts = duration_str.split(":")
                     duration_secs = 0
@@ -599,7 +672,7 @@ class YouTubeAPI:
                         duration_secs = int(parts[0]) * 60 + int(parts[1])
 
                     if duration_secs <= 3600:
-                        results.append(result)
+                        results.append(normalized)
                 except (ValueError, IndexError):
                     continue
 
@@ -607,10 +680,13 @@ class YouTubeAPI:
                 raise ValueError("No suitable videos found within duration limit")
 
             selected = results[query_type]
+            thumbnail = self._thumbnail_from_result(selected)
+            if not thumbnail:
+                raise ValueError("Thumbnail not available for the requested video.")
             return (
                 selected["title"],
                 selected["duration"],
-                selected["thumbnails"][0]["url"].split("?")[0],
+                thumbnail,
                 selected["id"]
             )
 

@@ -4,7 +4,7 @@ import re
 from pyrogram import filters
 from pyrogram.enums import ChatType
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
-from youtubesearchpython.__future__ import VideosSearch
+from youtubesearchpython.future import Video
 
 import config
 from VivaanXmusic import app
@@ -51,17 +51,27 @@ async def start_pm(client, message: Message, _):
         if name[0:3] == "inf":
             m = await message.reply_text("🔎")
             query = (str(name)).replace("info_", "", 1)
-            query = f"https://www.youtube.com/watch?v={query}"
-            results = VideosSearch(query, limit=1)
-            for result in (await results.next())["result"]:
-                title = result["title"]
-                duration = result["duration"]
-                views = result["viewCount"]["short"]
-                thumbnail = result["thumbnails"][0]["url"].split("?")[0]
-                channellink = result["channel"]["link"]
-                channel = result["channel"]["name"]
-                link = result["link"]
-                published = result["publishedTime"]
+            try:
+                result = await Video.get(query)
+            except Exception:
+                result = None
+            if not result or not result.get("title"):
+                return await m.edit_text("Failed to fetch track information.")
+            thumbnails = result.get("thumbnails") or []
+            thumbnail = config.YOUTUBE_IMG_URL
+            for thumb in thumbnails:
+                if isinstance(thumb, dict) and thumb.get("url"):
+                    thumbnail = thumb["url"].split("?")[0]
+                    break
+            title = result["title"]
+            duration = (result.get("duration") or {}).get("text") or "Unknown"
+            view_count = result.get("viewCount") or {}
+            views = view_count.get("short") or view_count.get("text") or "Unknown Views"
+            channel_data = result.get("channel") or {}
+            channellink = channel_data.get("link") or config.SUPPORT_CHAT
+            channel = channel_data.get("name") or "Unknown Channel"
+            link = result.get("link") or f"https://www.youtube.com/watch?v={query}"
+            published = result.get("publishedTime") or "Unknown"
             searched_text = _["start_6"].format(
                 title, duration, views, published, channellink, channel, app.mention
             )
