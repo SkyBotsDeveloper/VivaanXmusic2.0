@@ -42,6 +42,16 @@
       "value": "",
       "required": true
     },
+     "WORKER_FALLBACK_API_URL": {
+      "description": "Fallback YouTube converter API base URL",
+      "value": "https://youtubenewapi.skybotsdeveloper.workers.dev",
+      "required": false
+    },
+     "WORKER_FALLBACK_API_KEY": {
+      "description": "Fallback converter API key for /api endpoint",
+      "value": "",
+      "required": false
+    },
       "OWNER_ID": {
         "description": "The user id of user whom you would like to add as OWNER.",
         "value": "",
