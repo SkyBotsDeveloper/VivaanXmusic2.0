@@ -73,7 +73,7 @@ def _spawn_restart_with_killall():
 
 
 async def is_heroku():
-    return "heroku" in socket.getfqdn()
+    return bool(os.getenv("DYNO")) or "heroku" in socket.getfqdn().lower()
 
 
 @app.on_message(filters.command(["getlog", "logs", "getlogs"]) & SUDOERS)

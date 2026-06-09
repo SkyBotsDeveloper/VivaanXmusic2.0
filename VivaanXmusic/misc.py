@@ -1,3 +1,4 @@
+import os
 import socket
 import time
 
@@ -16,7 +17,7 @@ _boot_ = time.time()
 
 
 def is_heroku():
-    return "heroku" in socket.getfqdn()
+    return bool(os.getenv("DYNO")) or "heroku" in socket.getfqdn().lower()
 
 
 XCB = [
@@ -32,7 +33,7 @@ XCB = [
     "https",
     str(config.HEROKU_APP_NAME),
     "HEAD",
-    "master",
+    str(config.UPSTREAM_BRANCH),
 ]
 
 
@@ -64,7 +65,7 @@ async def sudo():
 
 def heroku():
     global HAPP
-    if is_heroku:
+    if is_heroku():
         if config.HEROKU_API_KEY and config.HEROKU_APP_NAME:
             try:
                 Heroku = heroku3.from_key(config.HEROKU_API_KEY)
